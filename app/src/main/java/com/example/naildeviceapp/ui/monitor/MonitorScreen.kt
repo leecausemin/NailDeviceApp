@@ -100,6 +100,7 @@ fun MonitorScreen(
             AcquisitionPanel(
                 status = state.status,
                 onSamplingRateChange = viewModel::setSamplingRate,
+                onImuSamplingRateChange = viewModel::setImuSamplingRate,
                 onRecordingChange = viewModel::setRecording,
                 onDownload = viewModel::downloadMemory
             )

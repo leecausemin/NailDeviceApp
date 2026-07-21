@@ -1,12 +1,14 @@
 package com.example.naildeviceapp.data.ble
 
+import android.content.ContentValues
 import android.content.Context
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import android.util.Log
-import java.io.BufferedOutputStream
 import java.io.BufferedWriter
 import java.io.File
-import java.io.FileOutputStream
-import java.io.RandomAccessFile
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -18,18 +20,18 @@ import java.util.Locale
  * storage, so a recording is simply the span of the stream the user chose to keep. That makes
  * start instant and the length unbounded.
  *
- * Gaps matter. If packets are lost the sample indices jump, and we pad the WAV with silence so the
- * audio stays aligned to real time instead of quietly shrinking.
+ * Microphone and IMU samples are stored as separate CSV files. Absolute sample indices preserve
+ * packet-loss information without inventing replacement samples.
  */
 class StreamRecorder(private val context: Context) {
 
     data class Result(val fileName: String, val micSamples: Long, val micGapSamples: Long)
 
-    private var wavFile: File? = null
-    private var wavStream: BufferedOutputStream? = null
-    private var csvWriter: BufferedWriter? = null
+    private var micFile: File? = null
+    private var imuFile: File? = null
+    private var micWriter: BufferedWriter? = null
+    private var imuWriter: BufferedWriter? = null
 
-    private var micSampleRate = NailProtocol.MIC_BASE_RATE_HZ
     private var micWritten = 0L
     private var micGaps = 0L
 
@@ -37,12 +39,11 @@ class StreamRecorder(private val context: Context) {
     private var expectedMicIndex = -1L
     private var baseName = ""
 
-    val isRecording: Boolean get() = wavStream != null
+    val isRecording: Boolean get() = micWriter != null
 
     fun start(sampleRate: Int) {
         if (isRecording) return
 
-        micSampleRate = sampleRate
         micWritten = 0
         micGaps = 0
         expectedMicIndex = -1
@@ -52,13 +53,15 @@ class StreamRecorder(private val context: Context) {
 
         val dir = File(context.getExternalFilesDir(null), "recordings").apply { mkdirs() }
 
-        val wav = File(dir, "$baseName.wav")
-        val stream = BufferedOutputStream(FileOutputStream(wav))
-        stream.write(ByteArray(WAV_HEADER_BYTES))   // patched with real sizes on stop
-        wavFile = wav
-        wavStream = stream
+        val mic = File(dir, "${baseName}_mic.csv")
+        micFile = mic
+        micWriter = mic.bufferedWriter().apply {
+            write("index,pcm\n")
+        }
 
-        csvWriter = File(dir, "$baseName.csv").bufferedWriter().apply {
+        val imu = File(dir, "${baseName}_imu.csv")
+        imuFile = imu
+        imuWriter = imu.bufferedWriter().apply {
             write("index,ax_g,ay_g,az_g,gx_dps,gy_dps,gz_dps\n")
         }
 
@@ -66,108 +69,106 @@ class StreamRecorder(private val context: Context) {
     }
 
     fun appendMic(index: Long, samples: ShortArray) {
-        val stream = wavStream ?: return
+        val writer = micWriter ?: return
 
         if (expectedMicIndex < 0) expectedMicIndex = index
 
-        // Pad the hole so playback stays time-aligned; a lost packet must not shift audio earlier.
+        // Keep the gap visible in the indices instead of silently closing it.
         val gap = index - expectedMicIndex
         if (gap > 0) {
-            writeSilence(stream, gap)
             micGaps += gap
-            micWritten += gap
         }
 
-        val bytes = ByteArray(samples.size * 2)
+        val rows = StringBuilder(samples.size * 16)
         for (i in samples.indices) {
-            val value = samples[i].toInt()
-            bytes[i * 2] = (value and 0xFF).toByte()
-            bytes[i * 2 + 1] = ((value shr 8) and 0xFF).toByte()
+            rows.append(index + i).append(',').append(samples[i]).append('\n')
         }
-        stream.write(bytes)
+        writer.write(rows.toString())
 
         micWritten += samples.size
         expectedMicIndex = index + samples.size
     }
 
     fun appendImu(index: Long, samples: List<ImuSample>) {
-        val writer = csvWriter ?: return
+        val writer = imuWriter ?: return
         samples.forEachIndexed { offset, s ->
             writer.write("${index + offset},${s.ax},${s.ay},${s.az},${s.gx},${s.gy},${s.gz}\n")
         }
     }
 
     fun stop(): Result? {
-        val stream = wavStream ?: return null
-        val file = wavFile ?: return null
+        val mic = micFile ?: return null
+        val imu = imuFile ?: return null
 
         return try {
-            stream.flush()
-            stream.close()
-            csvWriter?.flush()
-            csvWriter?.close()
-            patchWavHeader(file, micWritten, micSampleRate)
-            Log.i(TAG, "recording stopped: $baseName, $micWritten samples, $micGaps padded")
+            micWriter?.flush()
+            micWriter?.close()
+            imuWriter?.flush()
+            imuWriter?.close()
+            publishToDownloads(mic, imu)
+            Log.i(TAG, "recording stopped: $baseName, $micWritten samples, $micGaps lost")
             Result(baseName, micWritten, micGaps)
         } catch (e: Exception) {
             Log.e(TAG, "failed to finalise recording", e)
             null
         } finally {
-            wavStream = null
-            wavFile = null
-            csvWriter = null
+            micWriter = null
+            micFile = null
+            imuFile = null
+            imuWriter = null
         }
     }
 
-    private fun writeSilence(stream: BufferedOutputStream, samples: Long) {
-        var left = samples
-        val chunk = ByteArray(2 * SILENCE_CHUNK_SAMPLES)
-        while (left > 0) {
-            val n = minOf(left, SILENCE_CHUNK_SAMPLES.toLong()).toInt()
-            stream.write(chunk, 0, n * 2)
-            left -= n
+    /** Makes completed recordings visible in My Files > Downloads > NailDeviceApp. */
+    private fun publishToDownloads(mic: File, imu: File) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            Log.w(TAG, "Public Downloads export requires Android 10 or newer")
+            return
         }
-    }
 
-    /** 16-bit mono PCM header, written last because the sizes are only known at the end. */
-    private fun patchWavHeader(file: File, sampleCount: Long, sampleRate: Int) {
-        val dataBytes = (sampleCount * 2).toInt()
-        val byteRate = sampleRate * 2
+        val resolver = context.contentResolver
+        val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+        val relativePath = "${Environment.DIRECTORY_DOWNLOADS}/$DOWNLOAD_SUBDIRECTORY"
+        val pendingUris = mutableListOf<Uri>()
 
-        RandomAccessFile(file, "rw").use { raf ->
-            raf.seek(0)
-            raf.write("RIFF".toByteArray(Charsets.US_ASCII))
-            raf.writeIntLe(36 + dataBytes)
-            raf.write("WAVE".toByteArray(Charsets.US_ASCII))
-            raf.write("fmt ".toByteArray(Charsets.US_ASCII))
-            raf.writeIntLe(16)          // PCM chunk size
-            raf.writeShortLe(1)         // format = PCM
-            raf.writeShortLe(1)         // channels = mono
-            raf.writeIntLe(sampleRate)
-            raf.writeIntLe(byteRate)
-            raf.writeShortLe(2)         // block align
-            raf.writeShortLe(16)        // bits per sample
-            raf.write("data".toByteArray(Charsets.US_ASCII))
-            raf.writeIntLe(dataBytes)
+        try {
+            listOf(
+                Triple(mic, "${baseName}_mic.csv", "text/csv"),
+                Triple(imu, "${baseName}_imu.csv", "text/csv")
+            ).forEach { (source, displayName, mimeType) ->
+                val values = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+                    put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+                val uri = checkNotNull(resolver.insert(collection, values)) {
+                    "Failed to create $displayName in Downloads"
+                }
+                pendingUris += uri
+                source.inputStream().use { input ->
+                    checkNotNull(resolver.openOutputStream(uri, "w")).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+            }
+
+            val ready = ContentValues().apply {
+                put(MediaStore.MediaColumns.IS_PENDING, 0)
+            }
+            pendingUris.forEach { uri -> resolver.update(uri, ready, null, null) }
+
+            mic.delete()
+            imu.delete()
+            Log.i(TAG, "recording published to Downloads/$DOWNLOAD_SUBDIRECTORY/$baseName")
+        } catch (e: Exception) {
+            pendingUris.forEach { uri -> resolver.delete(uri, null, null) }
+            throw e
         }
     }
 
     private companion object {
         const val TAG = "StreamRecorder"
-        const val WAV_HEADER_BYTES = 44
-        const val SILENCE_CHUNK_SAMPLES = 4096
+        const val DOWNLOAD_SUBDIRECTORY = "NailDeviceApp"
     }
-}
-
-private fun RandomAccessFile.writeIntLe(value: Int) {
-    write(byteArrayOf(
-        (value and 0xFF).toByte(),
-        ((value shr 8) and 0xFF).toByte(),
-        ((value shr 16) and 0xFF).toByte(),
-        ((value shr 24) and 0xFF).toByte()
-    ))
-}
-
-private fun RandomAccessFile.writeShortLe(value: Int) {
-    write(byteArrayOf((value and 0xFF).toByte(), ((value shr 8) and 0xFF).toByte()))
 }

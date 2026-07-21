@@ -53,8 +53,11 @@
     <string name="status_memory_saved">Saved (%1$.2f%%)</string>
     <string name="status_elapsed">%1$d s</string>
     <string name="status_down_sampling">%1$d kHz</string>
+    <string name="status_sampling_rates">Mic %1$s\nIMU %2$s Hz</string>
 
     <string name="control_sampling_rates">Sampling rates</string>
+    <string name="control_mic_sampling_rate">Microphone (kHz)</string>
+    <string name="control_imu_sampling_rate">IMU (Hz)</string>
     <string name="control_recording">Recording</string>
     <string name="recording_off">Off</string>
     <string name="recording_start">Save Start</string>

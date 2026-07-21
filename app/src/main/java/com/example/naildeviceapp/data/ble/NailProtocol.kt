@@ -43,6 +43,13 @@ object NailProtocol {
     /** `0xA0 <kHz>` — kHz is one of 16, 8, 4, 2, 1. */
     fun cmdSetRate(kHz: Int) = byteArrayOf(0xA0.toByte(), kHz.toByte())
 
+    /** `0xA1 <Hz uint16 little-endian>` changes both accelerometer and gyroscope ODR. */
+    fun cmdSetImuRate(hz: Int) = byteArrayOf(
+        0xA1.toByte(),
+        (hz and 0xFF).toByte(),
+        ((hz shr 8) and 0xFF).toByte()
+    )
+
     /** PDM hardware rate; every offered rate is this divided by a power of two. */
     const val MIC_BASE_RATE_HZ = 16125
 

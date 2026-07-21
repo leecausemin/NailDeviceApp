@@ -2,6 +2,7 @@ package com.example.naildeviceapp.data
 
 import com.example.naildeviceapp.model.ConnectionState
 import com.example.naildeviceapp.model.DeviceStatus
+import com.example.naildeviceapp.model.ImuSamplingRate
 import com.example.naildeviceapp.model.RecordingState
 import com.example.naildeviceapp.model.SamplingRate
 import com.example.naildeviceapp.model.ScannedDevice
@@ -26,6 +27,7 @@ interface NailDeviceClient {
     fun disconnect()
 
     fun setSamplingRate(rate: SamplingRate)
+    fun setImuSamplingRate(rate: ImuSamplingRate)
     fun setGain(percent: Float)
     fun setTimeSync(enabled: Boolean)
     fun setRecording(state: RecordingState)

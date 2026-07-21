@@ -12,6 +12,14 @@ enum class SamplingRate(val label: String, val divider: Int, val kHz: Int) {
     Hz1k("1k", 0x01, 1)
 }
 
+/** LSM6DSL accelerometer and gyroscope output data rates exposed by this firmware. */
+enum class ImuSamplingRate(val label: String, val hz: Int) {
+    Hz104("104", 104),
+    Hz208("208", 208),
+    Hz416("416", 416),
+    Hz833("833", 833)
+}
+
 enum class MemoryStatus { Inactive, Active, Saved }
 
 enum class RecordingState { Off, Recording, Stopped }

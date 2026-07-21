@@ -26,6 +26,7 @@ import com.example.naildeviceapp.model.DeviceStatus
 import com.example.naildeviceapp.model.MemoryStatus
 import com.example.naildeviceapp.model.MonitoringSensor
 import com.example.naildeviceapp.model.RecordingState
+import com.example.naildeviceapp.model.ImuSamplingRate
 import com.example.naildeviceapp.model.SamplingRate
 import com.example.naildeviceapp.model.ScannedDevice
 import com.example.naildeviceapp.model.StreamMarks
@@ -129,6 +130,7 @@ class NailBleClient(
     private var recordingStartedAt = 0L
 
     private var pendingRate: SamplingRate? = null
+    private var pendingImuRate: ImuSamplingRate? = null
 
     // =================================================================================
     //  Scanning
@@ -337,6 +339,8 @@ class NailBleClient(
         // Apply a rate chosen before we were connected, then go live.
         pendingRate?.let { writeCommand(NailProtocol.cmdSetRate(it.kHz)) }
         pendingRate = null
+        pendingImuRate?.let { writeCommand(NailProtocol.cmdSetImuRate(it.hz)) }
+        pendingImuRate = null
         writeCommand(NailProtocol.CMD_START)
     }
 
@@ -433,6 +437,10 @@ class NailBleClient(
                 if (field.startsWith("mic_hz=")) {
                     field.removePrefix("mic_hz=").toIntOrNull()?.let { hz ->
                         micSampleRate = hz
+                        val rate = SamplingRate.entries.minByOrNull { abs(it.kHz * 1000 - hz) }
+                        if (rate != null) {
+                            _status.update { it.copy(samplingRate = rate) }
+                        }
                         // Aim for roughly MIC_DISPLAY_HZ points per second on the waveform.
                         micDecimation = (hz / MIC_DISPLAY_HZ).coerceAtLeast(1)
                         micDecimAccumulator = 0
@@ -441,6 +449,14 @@ class NailBleClient(
                         analysisWindow.clear()
                         expectedMicIndex = -1
                         Log.i(TAG, "mic rate $hz Hz, display decimation $micDecimation")
+                    }
+                }
+                if (field.startsWith("imu_hz=")) {
+                    field.removePrefix("imu_hz=").toIntOrNull()?.let { hz ->
+                        val rate = ImuSamplingRate.entries.minByOrNull { abs(it.hz - hz) }
+                        if (rate != null) {
+                            _status.update { it.copy(imuSamplingRate = rate) }
+                        }
                     }
                 }
             }
@@ -546,6 +562,15 @@ class NailBleClient(
         }
     }
 
+    override fun setImuSamplingRate(rate: ImuSamplingRate) {
+        _status.update { it.copy(imuSamplingRate = rate) }
+        if (_connectionState.value == ConnectionState.Connected) {
+            writeCommand(NailProtocol.cmdSetImuRate(rate.hz))
+        } else {
+            pendingImuRate = rate
+        }
+    }
+
     /** Not supported by this firmware. */
     override fun setGain(percent: Float) = Unit
 
@@ -575,7 +600,7 @@ class NailBleClient(
 
             RecordingState.Stopped -> {
                 _status.update { it.copy(recording = state, memory = MemoryStatus.Saved) }
-                // File name only exists once the WAV header is patched, so report it afterwards.
+                // File name is reported after both CSV streams are flushed and published.
                 scope.launch(streamDispatcher) {
                     val result = recorder.stop()
                     logLinkQuality()

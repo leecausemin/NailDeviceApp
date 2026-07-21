@@ -20,6 +20,7 @@ import com.example.naildeviceapp.R
 import com.example.naildeviceapp.model.DeviceStatus
 import com.example.naildeviceapp.model.MemoryStatus
 import com.example.naildeviceapp.model.RecordingState
+import com.example.naildeviceapp.model.ImuSamplingRate
 import com.example.naildeviceapp.model.SamplingRate
 import com.example.naildeviceapp.ui.common.LabeledSlider
 import com.example.naildeviceapp.ui.common.SectionCard
@@ -62,7 +63,11 @@ fun StatusPanel(
             )
             StatusTile(
                 label = stringResource(R.string.status_rate_short),
-                value = stringResource(R.string.status_down_sampling, status.samplingRate.kHz),
+                value = stringResource(
+                    R.string.status_sampling_rates,
+                    status.samplingRate.label,
+                    status.imuSamplingRate.label
+                ),
                 highlighted = false
             )
         }
@@ -105,16 +110,36 @@ private fun RowScope.StatusTile(label: String, value: String, highlighted: Boole
 fun AcquisitionPanel(
     status: DeviceStatus,
     onSamplingRateChange: (SamplingRate) -> Unit,
+    onImuSamplingRateChange: (ImuSamplingRate) -> Unit,
     onRecordingChange: (RecordingState) -> Unit,
     onDownload: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     SectionCard(title = stringResource(R.string.control_sampling_rates), modifier = modifier) {
+        Text(
+            text = stringResource(R.string.control_mic_sampling_rate),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
         SegmentedControl(
             options = SamplingRate.entries,
             selected = status.samplingRate,
             onSelect = onSamplingRateChange,
-            label = { it.label }
+            label = { it.label },
+            enabled = status.recording != RecordingState.Recording
+        )
+
+        Text(
+            text = stringResource(R.string.control_imu_sampling_rate),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        SegmentedControl(
+            options = ImuSamplingRate.entries,
+            selected = status.imuSamplingRate,
+            onSelect = onImuSamplingRateChange,
+            label = { it.label },
+            enabled = status.recording != RecordingState.Recording
         )
 
         Text(

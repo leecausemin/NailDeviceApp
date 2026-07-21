@@ -5,6 +5,7 @@ import com.example.naildeviceapp.model.DeviceStatus
 import com.example.naildeviceapp.model.MemoryStatus
 import com.example.naildeviceapp.model.MonitoringSensor
 import com.example.naildeviceapp.model.RecordingState
+import com.example.naildeviceapp.model.ImuSamplingRate
 import com.example.naildeviceapp.model.SamplingRate
 import com.example.naildeviceapp.model.ScannedDevice
 import com.example.naildeviceapp.model.StreamMarks
@@ -131,6 +132,10 @@ class MockNailDeviceClient(
 
     override fun setSamplingRate(rate: SamplingRate) {
         _status.update { it.copy(samplingRate = rate) }
+    }
+
+    override fun setImuSamplingRate(rate: ImuSamplingRate) {
+        _status.update { it.copy(imuSamplingRate = rate) }
     }
 
     override fun setGain(percent: Float) = Unit

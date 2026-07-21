@@ -12,6 +12,7 @@ import com.example.naildeviceapp.model.DeviceStatus
 import com.example.naildeviceapp.model.MonitoringSensor
 import com.example.naildeviceapp.model.RecordingState
 import com.example.naildeviceapp.model.SamplingRate
+import com.example.naildeviceapp.model.ImuSamplingRate
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -69,6 +70,8 @@ class MonitorViewModel(
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MonitorUiState())
 
     fun setSamplingRate(rate: SamplingRate) = client.setSamplingRate(rate)
+
+    fun setImuSamplingRate(rate: ImuSamplingRate) = client.setImuSamplingRate(rate)
 
     fun setRecording(state: RecordingState) = client.setRecording(state)
 
