@@ -56,8 +56,8 @@ class NailProtocolTest {
     fun `imu packet reads gyro first then accel, converted to physical units`() {
         // Firmware sends registers from 0x22: gyro xyz, then accel xyz.
         val packet = header(NailProtocol.MAGIC_IMU, 7L, 1) +
-            le16(100) + le16(200) + le16(300) +      // gyro
-            le16(1000) + le16(-2000) + le16(16384)   // accel
+            le16(100) + le16(200) + le16(300) +     // gyro
+            le16(1000) + le16(-2000) + le16(2048)   // accel
 
         val decoded = decodeNailPacket(packet) as NailPacket.Imu
         val sample = decoded.samples.single()
@@ -69,7 +69,8 @@ class NailProtocolTest {
         assertEquals(1000 * NailProtocol.ACCEL_G_PER_LSB, sample.ax, 1e-6f)
         assertEquals(-2000 * NailProtocol.ACCEL_G_PER_LSB, sample.ay, 1e-6f)
 
-        // 16384 LSB at +-2g is 1 g — the gravity check the firmware notes rely on.
+        // 2048 LSB at +-16g is 1 g — the gravity check the firmware notes rely on.
+        // This is the guard against firmware and app disagreeing about the full-scale range.
         assertEquals(1.0f, sample.az, 0.01f)
     }
 

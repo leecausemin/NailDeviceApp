@@ -32,6 +32,7 @@ import com.example.naildeviceapp.model.StreamMarks
 import com.example.naildeviceapp.ui.chart.SpectrogramData
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,6 +41,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.util.concurrent.Executors
 import kotlin.math.abs
 
 /**
@@ -49,8 +51,11 @@ import kotlin.math.abs
  * "recording" only decides whether those same samples also go to disk. That is why starting a
  * recording is instant and its length is unbounded — see [StreamRecorder].
  *
- * Notifications arrive on a binder thread. They are handed straight to [packets] and processed by a
- * single consumer coroutine, so nothing but the channel is shared across threads.
+ * Notifications arrive on a binder thread and are handed straight to [packets]. Everything
+ * downstream — decoding, the display buffers, the spectral window and the recorder — runs on
+ * [streamDispatcher], a single thread. The buffers are plain ArrayLists and RollingBuffers with no
+ * locking, so confining them to one thread is what keeps them safe; the channel is the only
+ * hand-off point that crosses threads.
  */
 @SuppressLint("MissingPermission")
 class NailBleClient(
@@ -83,6 +88,15 @@ class NailBleClient(
     private var rxCharacteristic: BluetoothGattCharacteristic? = null
 
     private val packets = Channel<NailPacket>(Channel.UNLIMITED)
+
+    /**
+     * Single thread owning every buffer below. Two coroutines touch them — the packet consumer and
+     * the chart emitter — and on a multi-threaded dispatcher that races (an ArrayList read while
+     * being appended throws ConcurrentModificationException).
+     */
+    private val streamDispatcher =
+        Executors.newSingleThreadExecutor { r -> Thread(r, "nail-stream") }.asCoroutineDispatcher()
+
     private var consumerJob: Job? = null
     private var emitJob: Job? = null
     private var scanJob: Job? = null
@@ -197,7 +211,6 @@ class NailBleClient(
 
     override fun disconnect() {
         runCatching { writeCommand(NailProtocol.CMD_STOP) }
-        finishRecordingIfAny()
 
         consumerJob?.cancel(); consumerJob = null
         emitJob?.cancel(); emitJob = null
@@ -207,7 +220,12 @@ class NailBleClient(
         gatt = null
         rxCharacteristic = null
 
-        resetBuffers()
+        // Close the file and clear the buffers on their owning thread, after the jobs are gone.
+        scope.launch(streamDispatcher) {
+            finishRecordingIfAny()
+            resetBuffers()
+        }
+
         _connectionState.value = ConnectionState.Idle
         _streamMarks.value = StreamMarks()
         _status.value = DeviceStatus()
@@ -300,10 +318,15 @@ class NailBleClient(
     }
 
     private fun onLinkReady() {
-        resetBuffers()
-        micReceived = 0
-        micLost = 0
-        expectedMicIndex = -1
+        // Called on a binder thread, so the buffer reset has to be queued onto the stream thread
+        // like every other touch of that state. It lands before the consumer's first packet
+        // because the dispatcher runs its queue in order.
+        scope.launch(streamDispatcher) {
+            resetBuffers()
+            micReceived = 0
+            micLost = 0
+            expectedMicIndex = -1
+        }
 
         startConsumer()
         startEmitter()
@@ -343,13 +366,20 @@ class NailBleClient(
 
     private fun startConsumer() {
         consumerJob?.cancel()
-        consumerJob = scope.launch {
+        consumerJob = scope.launch(streamDispatcher) {
+            // Anything queued by a previous session would be replayed with stale sample indices.
+            while (packets.tryReceive().isSuccess) { /* drain */ }
+
             while (isActive) {
-                when (val packet = packets.receive()) {
-                    is NailPacket.Mic -> onMic(packet)
-                    is NailPacket.Imu -> onImu(packet)
-                    is NailPacket.Text -> onText(packet.line)
-                }
+                val packet = packets.receive()
+                // One malformed packet must not take the app down mid-recording.
+                runCatching {
+                    when (packet) {
+                        is NailPacket.Mic -> onMic(packet)
+                        is NailPacket.Imu -> onImu(packet)
+                        is NailPacket.Text -> onText(packet.line)
+                    }
+                }.onFailure { Log.e(TAG, "packet handling failed", it) }
             }
         }
     }
@@ -394,6 +424,11 @@ class NailBleClient(
         Log.i(TAG, "board: $line")
 
         if (line.startsWith("RATE,")) {
+            // imu_ok=0 means the board could not talk to the LSM6DSL at boot, so every IMU
+            // sample will be zero. Without this the charts just look flat for no visible reason.
+            if (line.contains("imu_ok=0")) {
+                Log.e(TAG, "IMU init FAILED on the board — IMU data will be all zeros. Reset the board.")
+            }
             line.removePrefix("RATE,").split(",").forEach { field ->
                 if (field.startsWith("mic_hz=")) {
                     field.removePrefix("mic_hz=").toIntOrNull()?.let { hz ->
@@ -418,11 +453,13 @@ class NailBleClient(
 
     private fun startEmitter() {
         emitJob?.cancel()
-        emitJob = scope.launch {
+        emitJob = scope.launch(streamDispatcher) {
             while (isActive) {
-                analyseTick()
-                emitSnapshot()
-                trackRecordingTime()
+                runCatching {
+                    analyseTick()
+                    emitSnapshot()
+                    trackRecordingTime()
+                }.onFailure { Log.e(TAG, "chart frame failed", it) }
                 delay(TICK_MILLIS)
             }
         }
@@ -519,9 +556,13 @@ class NailBleClient(
         when (state) {
             RecordingState.Recording -> {
                 recordingStartedAt = System.currentTimeMillis()
-                micReceived = 0
-                micLost = 0
-                recorder.start(micSampleRate)
+                // The recorder is written to from the stream thread, so open it there too —
+                // otherwise start() races with an in-flight appendMic().
+                scope.launch(streamDispatcher) {
+                    micReceived = 0
+                    micLost = 0
+                    recorder.start(micSampleRate)
+                }
                 _status.update {
                     it.copy(
                         recording = state,
@@ -533,19 +574,17 @@ class NailBleClient(
             }
 
             RecordingState.Stopped -> {
-                val result = recorder.stop()
-                logLinkQuality()
-                _status.update {
-                    it.copy(
-                        recording = state,
-                        memory = MemoryStatus.Saved,
-                        savedFileName = result?.fileName.orEmpty()
-                    )
+                _status.update { it.copy(recording = state, memory = MemoryStatus.Saved) }
+                // File name only exists once the WAV header is patched, so report it afterwards.
+                scope.launch(streamDispatcher) {
+                    val result = recorder.stop()
+                    logLinkQuality()
+                    _status.update { it.copy(savedFileName = result?.fileName.orEmpty()) }
                 }
             }
 
             RecordingState.Off -> {
-                finishRecordingIfAny()
+                scope.launch(streamDispatcher) { finishRecordingIfAny() }
                 _status.update {
                     it.copy(
                         recording = state,

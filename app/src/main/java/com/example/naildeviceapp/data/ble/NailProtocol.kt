@@ -49,9 +49,13 @@ object NailProtocol {
     /** Advertised name of the firmware's NUS peripheral. */
     const val DEVICE_NAME = "Nordic_UART"
 
-    // ---- Raw LSB -> physical units (LSM6DSL, ±2g / 245 dps as configured in lsm6_init) ----
-    const val ACCEL_G_PER_LSB = 0.000061f
-    const val GYRO_DPS_PER_LSB = 0.00875f
+    /* ---- Raw LSB -> physical units ----
+     * Must match the ranges lsm6_init() writes to CTRL1_XL/CTRL2_G. Ranges were widened
+     * from ±2g/±245dps because tap impacts clipped (12.4% of accel Y sat at the rail),
+     * and clipped samples cannot be recovered. Change one side without the other and
+     * every reading is off by a constant factor — silently, since it still looks plausible. */
+    const val ACCEL_G_PER_LSB = 0.000488f   // ±16 g
+    const val GYRO_DPS_PER_LSB = 0.07f      // ±2000 dps
     const val MIC_FULL_SCALE = 32768f
 }
 
