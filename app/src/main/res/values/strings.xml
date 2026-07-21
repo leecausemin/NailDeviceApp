@@ -1,0 +1,77 @@
+<resources>
+    <string name="app_name">NailDeviceApp</string>
+
+    <!-- Scan screen -->
+    <string name="scan_title">Body Facing Microphone System</string>
+    <string name="scan_action">Scan</string>
+    <string name="scan_stop">Stop</string>
+    <string name="scan_scanning">Scanning…</string>
+    <string name="scan_idle">Tap Scan to look for devices</string>
+    <string name="scan_peripherals_found">Peripherals Found: %1$d</string>
+    <string name="scan_rssi">%1$d dBm</string>
+    <string name="scan_connecting">Connecting…</string>
+    <string name="scan_empty">No peripherals yet</string>
+
+    <string name="mark_imu_on">IMU_On</string>
+    <string name="mark_imu_off">IMU_Off</string>
+    <string name="mark_mic_on">Mic_On</string>
+    <string name="mark_mic_off">Mic_Off</string>
+
+    <!-- Monitor screen -->
+    <string name="monitor_title">Monitor</string>
+    <string name="monitor_disconnect">Disconnect</string>
+    <string name="monitor_settings">Settings</string>
+
+    <string name="chart_spectrogram">Spectrogram</string>
+    <string name="chart_power">Frequency Power (&lt; 150 Hz)</string>
+    <string name="chart_gyro">Gyroscope Data</string>
+    <string name="chart_imu">IMU Data</string>
+    <string name="chart_mic">Microphone Data</string>
+    <string name="chart_temperature">Temperature Data</string>
+
+    <string name="series_intensity">Intensity</string>
+    <string name="series_gyro_x">GyroX</string>
+    <string name="series_gyro_y">GyroY</string>
+    <string name="series_gyro_z">GyroZ</string>
+    <string name="series_acc_x">AccX</string>
+    <string name="series_acc_y">AccY</string>
+    <string name="series_acc_z">AccZ</string>
+    <string name="series_mic">Mic</string>
+    <string name="series_temperature">Temp (°C)</string>
+
+    <string name="status_panel_title">Status</string>
+    <string name="status_time_sync">Time Sync.</string>
+    <!-- Short forms keep the status tiles on a single line -->
+    <string name="status_sync_short">Sync</string>
+    <string name="status_memory_short">Memory</string>
+    <string name="status_elapsed_short">Elapsed</string>
+    <string name="status_rate_short">Rate</string>
+    <string name="status_sync_on">Sync. On</string>
+    <string name="status_sync_off">Sync. Off</string>
+    <string name="status_memory_inactive">Inactive</string>
+    <string name="status_memory_active">Active</string>
+    <string name="status_memory_saved">Saved (%1$.2f%%)</string>
+    <string name="status_elapsed">%1$d s</string>
+    <string name="status_down_sampling">%1$d kHz</string>
+
+    <string name="control_sampling_rates">Sampling rates</string>
+    <string name="control_recording">Recording</string>
+    <string name="recording_off">Off</string>
+    <string name="recording_start">Save Start</string>
+    <string name="recording_stop">Save Stop</string>
+    <string name="control_download">Download</string>
+    <string name="control_downloading">Downloading %1$d%%</string>
+    <string name="control_gain">Gain</string>
+    <string name="control_calibration">Calibration</string>
+    <string name="control_calib_max">Calib. Max:</string>
+    <string name="control_calib_min">Calib. Min:</string>
+
+    <!-- Settings screen -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_spectral_title">Real-Time Spectral Monitoring</string>
+    <string name="settings_monitoring_sensor">Monitoring sensor</string>
+    <string name="settings_sensor_expand">Show sensor options</string>
+    <string name="settings_sensor_collapse">Hide sensor options</string>
+    <string name="settings_visualized_data">Visualized Data</string>
+    <string name="settings_visualized_summary">%1$d of %2$d shown</string>
+</resources>
