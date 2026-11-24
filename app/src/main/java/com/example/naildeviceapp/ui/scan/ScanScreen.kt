@@ -38,8 +38,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.naildeviceapp.R
 import com.example.naildeviceapp.model.ConnectionState
+import com.example.naildeviceapp.model.DeviceMode
 import com.example.naildeviceapp.model.ScannedDevice
 import com.example.naildeviceapp.model.StreamMarks
+import com.example.naildeviceapp.ui.common.SectionCard
+import com.example.naildeviceapp.ui.common.SegmentedControl
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -65,13 +68,19 @@ fun ScanScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            DeviceModeSelector(
+                selected = state.deviceMode,
+                enabled = !state.isConnecting,
+                onSelect = viewModel::selectDeviceMode
+            )
+
             ScanHeader(
                 deviceCount = state.devices.size,
                 isScanning = state.isScanning,
                 onToggleScan = viewModel::toggleScan
             )
 
-            StreamMarkRow(state.marks)
+            StreamMarkRow(state.marks, state.deviceMode)
 
             if (state.isConnecting) {
                 LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -89,6 +98,35 @@ fun ScanScreen(
                 modifier = Modifier.fillMaxSize()
             )
         }
+    }
+}
+
+@Composable
+private fun DeviceModeSelector(
+    selected: DeviceMode,
+    enabled: Boolean,
+    onSelect: (DeviceMode) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    SectionCard(title = stringResource(R.string.device_mode_title), modifier = modifier) {
+        SegmentedControl(
+            options = DeviceMode.entries,
+            selected = selected,
+            onSelect = onSelect,
+            label = { it.label },
+            enabled = enabled
+        )
+        Text(
+            text = stringResource(
+                if (selected == DeviceMode.DualErm) {
+                    R.string.device_mode_erm_note
+                } else {
+                    R.string.device_mode_nail_note
+                }
+            ),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -135,7 +173,11 @@ private fun ScanHeader(
 }
 
 @Composable
-private fun StreamMarkRow(marks: StreamMarks, modifier: Modifier = Modifier) {
+private fun StreamMarkRow(
+    marks: StreamMarks,
+    deviceMode: DeviceMode,
+    modifier: Modifier = Modifier
+) {
     Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         StreamMarkChip(
             active = marks.imuActive,
@@ -143,7 +185,11 @@ private fun StreamMarkRow(marks: StreamMarks, modifier: Modifier = Modifier) {
         )
         StreamMarkChip(
             active = marks.micActive,
-            labelRes = if (marks.micActive) R.string.mark_mic_on else R.string.mark_mic_off
+            labelRes = when {
+                !deviceMode.hasMicrophone -> R.string.mark_mic_na
+                marks.micActive -> R.string.mark_mic_on
+                else -> R.string.mark_mic_off
+            }
         )
     }
 }

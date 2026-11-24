@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.naildeviceapp.AppContainer
 import com.example.naildeviceapp.data.NailDeviceClient
 import com.example.naildeviceapp.model.ConnectionState
+import com.example.naildeviceapp.model.DeviceMode
 import com.example.naildeviceapp.model.ScannedDevice
 import com.example.naildeviceapp.model.StreamMarks
 import kotlinx.coroutines.flow.SharingStarted
@@ -15,7 +16,8 @@ import kotlinx.coroutines.flow.stateIn
 data class ScanUiState(
     val devices: List<ScannedDevice> = emptyList(),
     val connectionState: ConnectionState = ConnectionState.Idle,
-    val marks: StreamMarks = StreamMarks()
+    val marks: StreamMarks = StreamMarks(),
+    val deviceMode: DeviceMode = DeviceMode.Nail
 ) {
     val isScanning: Boolean get() = connectionState == ConnectionState.Scanning
     val isConnecting: Boolean get() = connectionState == ConnectionState.Connecting
@@ -29,8 +31,11 @@ class ScanViewModel(
         combine(
             client.discoveredDevices,
             client.connectionState,
-            client.streamMarks
-        ) { devices, connection, marks -> ScanUiState(devices, connection, marks) }
+            client.streamMarks,
+            client.status
+        ) { devices, connection, marks, status ->
+            ScanUiState(devices, connection, marks, status.deviceMode)
+        }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ScanUiState())
 
     fun toggleScan() {
@@ -38,4 +43,6 @@ class ScanViewModel(
     }
 
     fun connect(device: ScannedDevice) = client.connect(device)
+
+    fun selectDeviceMode(mode: DeviceMode) = client.selectDeviceMode(mode)
 }

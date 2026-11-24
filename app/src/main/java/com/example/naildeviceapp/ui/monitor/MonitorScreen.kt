@@ -74,11 +74,6 @@ fun MonitorScreen(
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            StatusPanel(
-                status = state.status,
-                onToggleTimeSync = viewModel::toggleTimeSync
-            )
-
             // The spectral views are always shown; everything below them is user-selectable.
             SpectrogramCard(state.sensors.spectrogram, state.monitoringSensor.label)
             PowerChartCard(state.sensors.power, state.monitoringSensor.label)
@@ -90,7 +85,7 @@ fun MonitorScreen(
             if (OptionalChart.Imu in visible) {
                 AccelChartCard(state.sensors.accel)
             }
-            if (OptionalChart.Microphone in visible) {
+            if (state.status.hasMicrophone && OptionalChart.Microphone in visible) {
                 MicChartCard(state.sensors.mic)
             }
             if (OptionalChart.Temperature in visible) {
@@ -99,21 +94,17 @@ fun MonitorScreen(
 
             AcquisitionPanel(
                 status = state.status,
+                saveLocation = state.saveLocation,
                 onSamplingRateChange = viewModel::setSamplingRate,
                 onImuSamplingRateChange = viewModel::setImuSamplingRate,
                 onRecordingChange = viewModel::setRecording,
+                onUseDefaultLocation = viewModel::useDefaultSaveLocation,
+                onFolderPicked = viewModel::useSaveFolder,
                 onDownload = viewModel::downloadMemory
             )
 
-            CalibrationPanel(
-                gainPercent = state.controls.gainPercent,
-                calibrationMax = state.controls.calibrationMax,
-                calibrationMin = state.controls.calibrationMin,
-                onGainChange = viewModel::setGain,
-                onGainCommit = viewModel::commitGain,
-                onCalibrationMaxChange = viewModel::setCalibrationMax,
-                onCalibrationMinChange = viewModel::setCalibrationMin
-            )
+            StatusPanel(status = state.status)
+
         }
     }
 }

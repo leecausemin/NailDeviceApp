@@ -11,11 +11,15 @@
     <string name="scan_rssi">%1$d dBm</string>
     <string name="scan_connecting">Connecting…</string>
     <string name="scan_empty">No peripherals yet</string>
+    <string name="device_mode_title">Device type</string>
+    <string name="device_mode_nail_note">Nail: microphone + LSM6 IMU, 1666 Hz raw by default.</string>
+    <string name="device_mode_erm_note">ERM: BMI160 IMU only, 1600 Hz packed by default for a smoother BLE stream.</string>
 
     <string name="mark_imu_on">IMU_On</string>
     <string name="mark_imu_off">IMU_Off</string>
     <string name="mark_mic_on">Mic_On</string>
     <string name="mark_mic_off">Mic_Off</string>
+    <string name="mark_mic_na">Mic_N/A</string>
 
     <!-- Monitor screen -->
     <string name="monitor_title">Monitor</string>
@@ -24,10 +28,10 @@
 
     <string name="chart_spectrogram">Spectrogram</string>
     <string name="chart_power">Frequency Power (&lt; 150 Hz)</string>
-    <string name="chart_gyro">Gyroscope Data</string>
-    <string name="chart_imu">IMU Data</string>
-    <string name="chart_mic">Microphone Data</string>
-    <string name="chart_temperature">Temperature Data</string>
+    <string name="chart_gyro">Gyroscope Signal</string>
+    <string name="chart_imu">Accelerometer Signal</string>
+    <string name="chart_mic">Microphone Signal</string>
+    <string name="chart_temperature">Temperature Signal</string>
 
     <string name="series_intensity">Intensity</string>
     <string name="series_gyro_x">GyroX</string>
@@ -40,23 +44,26 @@
     <string name="series_temperature">Temp (°C)</string>
 
     <string name="status_panel_title">Status</string>
-    <string name="status_time_sync">Time Sync.</string>
+    <string name="status_panel_with_mode">Status - %1$s</string>
     <!-- Short forms keep the status tiles on a single line -->
-    <string name="status_sync_short">Sync</string>
     <string name="status_memory_short">Memory</string>
     <string name="status_elapsed_short">Elapsed</string>
     <string name="status_rate_short">Rate</string>
-    <string name="status_sync_on">Sync. On</string>
-    <string name="status_sync_off">Sync. Off</string>
     <string name="status_memory_inactive">Inactive</string>
     <string name="status_memory_active">Active</string>
     <string name="status_memory_saved">Saved (%1$.2f%%)</string>
     <string name="status_elapsed">%1$d s</string>
     <string name="status_down_sampling">%1$d kHz</string>
     <string name="status_sampling_rates">Mic %1$s\nIMU %2$s Hz</string>
+    <string name="status_imu_only_rate">IMU %1$s Hz</string>
+    <!-- Board-reported sensor health. "Failed" means every IMU sample is zero, which is otherwise
+         indistinguishable from a perfectly still sensor. -->
+    <string name="status_imu_short">IMU</string>
+    <string name="status_imu_ok">OK</string>
+    <string name="status_imu_failed">Failed</string>
 
     <string name="control_sampling_rates">Sampling rates</string>
-    <string name="control_mic_sampling_rate">Microphone (kHz)</string>
+    <string name="control_mic_sampling_rate">Microphone (Hz)</string>
     <string name="control_imu_sampling_rate">IMU (Hz)</string>
     <string name="control_recording">Recording</string>
     <string name="recording_off">Off</string>
@@ -64,10 +71,6 @@
     <string name="recording_stop">Save Stop</string>
     <string name="control_download">Download</string>
     <string name="control_downloading">Downloading %1$d%%</string>
-    <string name="control_gain">Gain</string>
-    <string name="control_calibration">Calibration</string>
-    <string name="control_calib_max">Calib. Max:</string>
-    <string name="control_calib_min">Calib. Min:</string>
 
     <!-- Settings screen -->
     <string name="settings_title">Settings</string>
@@ -75,6 +78,24 @@
     <string name="settings_monitoring_sensor">Monitoring sensor</string>
     <string name="settings_sensor_expand">Show sensor options</string>
     <string name="settings_sensor_collapse">Hide sensor options</string>
+    <string name="settings_transmission_title">Transmission</string>
+    <string name="settings_compression">Compression</string>
+    <string name="settings_compression_expand">Show compression options</string>
+    <string name="settings_compression_collapse">Hide compression options</string>
+    <string name="settings_compression_note">Compression is what lets mic 16 kHz and IMU 6.6 kHz run together; uncompressed, about a quarter of the IMU samples are dropped. Only Mic raw / IMU raw is lossless.</string>
+    <string name="settings_compression_note_erm">Packed is recommended at 1.6 kHz because it reduces IMU notifications from about 84 to 62 per second. Raw is lossless but is best used at 0.8 kHz on a weak link.</string>
+    <string name="settings_compression_locked">Locked while recording: changing this restarts the board\'s sample numbering, which would split the recording in two.</string>
+
+    <string name="control_save_location">Save location</string>
+    <string name="save_location_default">Default</string>
+    <string name="save_location_custom">Choose folder</string>
+    <string name="control_save_default_path">Downloads/NailDeviceApp</string>
+    <string name="control_save_change_folder">%1$s — tap to change</string>
+    <string name="control_save_pick_folder">Tap to pick a folder</string>
+
     <string name="settings_visualized_data">Visualized Data</string>
     <string name="settings_visualized_summary">%1$d of %2$d shown</string>
+    <string name="settings_charts">Charts</string>
+    <string name="settings_charts_expand">Show chart options</string>
+    <string name="settings_charts_collapse">Hide chart options</string>
 </resources>

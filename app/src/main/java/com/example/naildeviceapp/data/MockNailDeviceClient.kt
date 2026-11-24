@@ -2,13 +2,16 @@ package com.example.naildeviceapp.data
 
 import com.example.naildeviceapp.model.ConnectionState
 import com.example.naildeviceapp.model.DeviceStatus
+import com.example.naildeviceapp.model.DeviceMode
 import com.example.naildeviceapp.model.MemoryStatus
 import com.example.naildeviceapp.model.MonitoringSensor
 import com.example.naildeviceapp.model.RecordingState
+import com.example.naildeviceapp.model.ChartWindow
 import com.example.naildeviceapp.model.ImuSamplingRate
 import com.example.naildeviceapp.model.SamplingRate
 import com.example.naildeviceapp.model.ScannedDevice
 import com.example.naildeviceapp.model.StreamMarks
+import com.example.naildeviceapp.model.StreamProfile
 import com.example.naildeviceapp.ui.chart.SpectrogramData
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -21,19 +24,20 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.random.Random
 
-private const val TICK_MILLIS = 50L
+private const val TICK_MILLIS = ChartWindow.TICK_MILLIS
 private const val TICK_SECONDS = TICK_MILLIS / 1000.0
 
-private const val POWER_CAPACITY = 200
-private const val TEMPERATURE_CAPACITY = 200
-private const val IMU_CAPACITY = 500
-private const val MIC_CAPACITY = 600
-private const val SPECTROGRAM_COLUMNS = 140
+/**
+ * Kept in step with the real client: power, temperature and the spectrogram advance once per
+ * analysis pass, not once per frame, so their capacities follow [ChartWindow.ANALYSIS_HZ].
+ */
+private const val SPECTROGRAM_COLUMNS = ChartWindow.SPECTROGRAM_COLUMNS
 private const val SPECTROGRAM_BINS = 64
 
-private const val GYRO_PER_TICK = 5
-private const val ACCEL_PER_TICK = 5
-private const val MIC_PER_TICK = 30
+/** Generated straight at the display rates, so the mock needs no thinning stage of its own. */
+private const val GYRO_PER_TICK = ChartWindow.IMU_DISPLAY_HZ / ChartWindow.TICK_HZ
+private const val ACCEL_PER_TICK = ChartWindow.IMU_DISPLAY_HZ / ChartWindow.TICK_HZ
+private const val MIC_PER_TICK = ChartWindow.MIC_DISPLAY_HZ / ChartWindow.TICK_HZ
 
 /** Samples fed to the DFT; must be at least twice [SPECTROGRAM_BINS]. */
 private const val ANALYSIS_WINDOW = 128
@@ -53,22 +57,25 @@ class MockNailDeviceClient(
     private val _streamMarks = MutableStateFlow(StreamMarks())
     override val streamMarks: StateFlow<StreamMarks> = _streamMarks.asStateFlow()
 
-    private val _status = MutableStateFlow(DeviceStatus())
+    private val _status = MutableStateFlow(DeviceStatus.forMode(DeviceMode.Nail))
     override val status: StateFlow<DeviceStatus> = _status.asStateFlow()
 
     private val _sensors = MutableStateFlow(SensorSnapshot.EMPTY)
     override val sensors: StateFlow<SensorSnapshot> = _sensors.asStateFlow()
 
     private val generator = MockSignalGenerator()
-    private val powerBuffer = RollingBuffer(POWER_CAPACITY)
-    private val gyroBuffers = XyzBuffers(IMU_CAPACITY)
-    private val accelBuffers = XyzBuffers(IMU_CAPACITY)
-    private val micBuffer = RollingBuffer(MIC_CAPACITY)
-    private val temperatureBuffer = RollingBuffer(TEMPERATURE_CAPACITY)
+    private val powerBuffer = RollingBuffer(ChartWindow.POWER_CAPACITY)
+    private val gyroBuffers = XyzBuffers(ChartWindow.IMU_CAPACITY)
+    private val accelBuffers = XyzBuffers(ChartWindow.IMU_CAPACITY)
+    private val micBuffer = RollingBuffer(ChartWindow.MIC_CAPACITY)
+    private val temperatureBuffer = RollingBuffer(ChartWindow.TEMPERATURE_CAPACITY)
     private val spectrogram = ArrayDeque<FloatArray>(SPECTROGRAM_COLUMNS)
     private val analysisWindow = SlidingWindow(ANALYSIS_WINDOW)
     private val analyzer = SpectrumAnalyzer(ANALYSIS_WINDOW, SPECTROGRAM_BINS)
     private var analysedSensor = MonitoringSensor.Microphone
+
+    /** Counts frames so the analyser runs on a fraction of them, as the real client does. */
+    private var analysisFrame = 0
 
     private var scanJob: Job? = null
     private var streamJob: Job? = null
@@ -111,8 +118,11 @@ class MockNailDeviceClient(
 
         scope.launch {
             delay(700)
-            _status.update { it.copy(deviceName = device.name, timeSyncOn = true) }
-            _streamMarks.value = StreamMarks(imuActive = true, micActive = true)
+            _status.update { it.copy(deviceName = device.name) }
+            _streamMarks.value = StreamMarks(
+                imuActive = true,
+                micActive = _status.value.hasMicrophone
+            )
             _connectionState.value = ConnectionState.Connected
             startStreaming()
         }
@@ -126,8 +136,16 @@ class MockNailDeviceClient(
         recordingTicks = 0
         _connectionState.value = ConnectionState.Idle
         _streamMarks.value = StreamMarks()
-        _status.value = DeviceStatus()
+        _status.value = DeviceStatus.forMode(_status.value.deviceMode)
         _sensors.value = SensorSnapshot.EMPTY
+    }
+
+    override fun selectDeviceMode(mode: DeviceMode) {
+        if (_connectionState.value == ConnectionState.Connecting ||
+            _connectionState.value == ConnectionState.Connected
+        ) return
+        preferences.applyDeviceMode(mode)
+        _status.value = DeviceStatus.forMode(mode)
     }
 
     override fun setSamplingRate(rate: SamplingRate) {
@@ -138,11 +156,12 @@ class MockNailDeviceClient(
         _status.update { it.copy(imuSamplingRate = rate) }
     }
 
-    override fun setGain(percent: Float) = Unit
-
-    override fun setTimeSync(enabled: Boolean) {
-        _status.update { it.copy(timeSyncOn = enabled) }
+    /** The mock generates already-decoded samples, so the profile only changes what is displayed. */
+    override fun setStreamProfile(profile: StreamProfile) {
+        _status.update { it.copy(streamProfile = profile) }
     }
+
+    override fun setGain(percent: Float) = Unit
 
     override fun setRecording(state: RecordingState) {
         recordingTicks = 0
@@ -210,10 +229,14 @@ class MockNailDeviceClient(
         gyroBuffers.addAll(gyroChunk)
         accelBuffers.addAll(accelChunk)
         micBuffer.addAll(micChunk)
-        temperatureBuffer.add(generator.temperature())
+        if (isAnalysisFrame()) temperatureBuffer.add(generator.temperature())
 
         analyseSelectedSensor(gyroChunk, accelChunk, micChunk)
+        analysisFrame++
     }
+
+    /** Mirrors the real client so previews sweep at the same rate the device does. */
+    private fun isAnalysisFrame() = analysisFrame % ChartWindow.ANALYSIS_EVERY == 0
 
     /**
      * Feeds the sensor chosen on the settings screen into the DFT, then derives both spectral views
@@ -239,6 +262,8 @@ class MockNailDeviceClient(
                 MonitoringSensor.GyroZ -> gyro.z
             }
         )
+
+        if (!isAnalysisFrame()) return
 
         val spectrum = analyzer.magnitudes(analysisWindow.snapshot())
         powerBuffer.add(analyzer.lowBandPower(spectrum))
@@ -276,6 +301,7 @@ class MockNailDeviceClient(
         temperatureBuffer.clear()
         spectrogram.clear()
         analysisWindow.clear()
+        analysisFrame = 0
     }
 
     private companion object {

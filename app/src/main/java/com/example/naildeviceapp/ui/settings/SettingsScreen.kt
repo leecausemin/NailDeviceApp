@@ -5,6 +5,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -34,12 +35,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.naildeviceapp.R
 import com.example.naildeviceapp.model.OptionalChart
 import com.example.naildeviceapp.model.MonitoringSensor
+import com.example.naildeviceapp.model.RecordingState
+import com.example.naildeviceapp.model.StreamProfile
 import com.example.naildeviceapp.ui.common.SectionCard
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -51,6 +55,7 @@ fun SettingsScreen(
 ) {
     val selected by viewModel.selectedSensor.collectAsStateWithLifecycle()
     val visibleCharts by viewModel.visibleCharts.collectAsStateWithLifecycle()
+    val status by viewModel.status.collectAsStateWithLifecycle()
 
     Scaffold(
         modifier = modifier,
@@ -79,44 +84,49 @@ fun SettingsScreen(
             SectionCard(title = stringResource(R.string.settings_spectral_title)) {
                 MonitoringSensorSelector(
                     selected = selected,
-                    options = viewModel.sensorOptions,
+                    options = viewModel.sensorOptions(status.deviceMode),
                     onSelect = viewModel::selectSensor
                 )
             }
 
-            SectionCard(
-                title = stringResource(R.string.settings_visualized_data),
-                trailing = {
-                    Text(
-                        text = stringResource(
-                            R.string.settings_visualized_summary,
-                            visibleCharts.size,
-                            viewModel.chartOptions.size
-                        ),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            ) {
-                viewModel.chartOptions.forEach { kind ->
-                    ChartToggleRow(
-                        kind = kind,
-                        checked = kind in visibleCharts,
-                        onToggle = { viewModel.toggleChart(kind) }
-                    )
-                }
+            SectionCard(title = stringResource(R.string.settings_transmission_title)) {
+                StreamProfileSelector(
+                    selected = status.streamProfile,
+                    options = viewModel.profileOptions(status.deviceMode),
+                    hasMicrophone = status.hasMicrophone,
+                    onSelect = viewModel::selectStreamProfile,
+                    // Changing the profile makes the board restart both streams' sample numbering.
+                    // Mid-recording that splits the CSVs into two runs of indices with a real gap
+                    // between them, which is invisible until someone tries to read the file.
+                    enabled = status.recording != RecordingState.Recording
+                )
+            }
+
+            SectionCard(title = stringResource(R.string.settings_visualized_data)) {
+                ChartVisibilitySelector(
+                    visible = visibleCharts,
+                    options = viewModel.chartOptions(status.deviceMode),
+                    onToggle = viewModel::toggleChart
+                )
             }
         }
     }
 }
 
-/** Collapsed row showing the active sensor; tapping it reveals the full choice list. */
+/**
+ * Collapsed row showing the current value; tapping it reveals [content].
+ *
+ * Every setting on this screen is set once and then left alone, so each one costs a single line
+ * until the user goes looking for it.
+ */
 @Composable
-private fun MonitoringSensorSelector(
-    selected: MonitoringSensor,
-    options: List<MonitoringSensor>,
-    onSelect: (MonitoringSensor) -> Unit,
-    modifier: Modifier = Modifier
+private fun ExpandableRow(
+    label: String,
+    value: String,
+    expandDescription: String,
+    collapseDescription: String,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     val chevronRotation by animateFloatAsState(
@@ -130,29 +140,31 @@ private fun MonitoringSensorSelector(
                 .fillMaxWidth()
                 .clickable { expanded = !expanded }
                 .padding(vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = stringResource(R.string.settings_monitoring_sensor),
+                text = label,
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Row(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.End),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = selected.label,
+                    text = value,
                     style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.primary
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
                 )
                 Icon(
                     imageVector = Icons.Filled.ExpandMore,
-                    contentDescription = stringResource(
-                        if (expanded) R.string.settings_sensor_collapse
-                        else R.string.settings_sensor_expand
-                    ),
+                    contentDescription =
+                        if (expanded) collapseDescription else expandDescription,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.rotate(chevronRotation)
                 )
@@ -160,19 +172,157 @@ private fun MonitoringSensorSelector(
         }
 
         AnimatedVisibility(visible = expanded) {
-            Column(Modifier.selectableGroup()) {
-                HorizontalDivider()
-                options.forEach { sensor ->
-                    SensorOptionRow(
-                        sensor = sensor,
-                        selected = sensor == selected,
-                        onSelect = { onSelect(sensor) }
-                    )
-                }
+            Column(content = content)
+        }
+    }
+}
+
+@Composable
+private fun MonitoringSensorSelector(
+    selected: MonitoringSensor,
+    options: List<MonitoringSensor>,
+    onSelect: (MonitoringSensor) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    ExpandableRow(
+        label = stringResource(R.string.settings_monitoring_sensor),
+        value = selected.label,
+        expandDescription = stringResource(R.string.settings_sensor_expand),
+        collapseDescription = stringResource(R.string.settings_sensor_collapse),
+        modifier = modifier
+    ) {
+        Column(Modifier.selectableGroup()) {
+            HorizontalDivider()
+            options.forEach { sensor ->
+                SensorOptionRow(
+                    sensor = sensor,
+                    selected = sensor == selected,
+                    onSelect = { onSelect(sensor) }
+                )
             }
         }
     }
 }
+
+/**
+ * Compression sits here rather than beside the sampling rates because it is a property of the
+ * link, not of a recording: mic 16 kHz alongside IMU 6664 Hz does not fit uncompressed, so this is
+ * set once and left alone. The caption spells out that the default is lossy — the alternative is a
+ * silent quality drop that looks like a free bandwidth win.
+ */
+@Composable
+private fun StreamProfileSelector(
+    selected: StreamProfile,
+    options: List<StreamProfile>,
+    hasMicrophone: Boolean,
+    onSelect: (StreamProfile) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
+) {
+    ExpandableRow(
+        label = stringResource(R.string.settings_compression),
+        value = profileLabel(selected, hasMicrophone),
+        expandDescription = stringResource(R.string.settings_compression_expand),
+        collapseDescription = stringResource(R.string.settings_compression_collapse),
+        modifier = modifier
+    ) {
+        Column(Modifier.selectableGroup()) {
+            HorizontalDivider()
+            options.forEach { profile ->
+                ProfileOptionRow(
+                    profile = profile,
+                    selected = profile == selected,
+                    onSelect = { onSelect(profile) },
+                    enabled = enabled,
+                    label = profileLabel(profile, hasMicrophone)
+                )
+            }
+            if (!enabled) {
+                Text(
+                    text = stringResource(R.string.settings_compression_locked),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+            Text(
+                text = stringResource(
+                    if (hasMicrophone) R.string.settings_compression_note
+                    else R.string.settings_compression_note_erm
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp, bottom = 4.dp)
+            )
+        }
+    }
+}
+
+/** Same collapsed row as the selectors above, but the list holds independent checkboxes. */
+@Composable
+private fun ChartVisibilitySelector(
+    visible: Set<OptionalChart>,
+    options: List<OptionalChart>,
+    onToggle: (OptionalChart) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    ExpandableRow(
+        label = stringResource(R.string.settings_charts),
+        value = stringResource(
+            R.string.settings_visualized_summary,
+            visible.size,
+            options.size
+        ),
+        expandDescription = stringResource(R.string.settings_charts_expand),
+        collapseDescription = stringResource(R.string.settings_charts_collapse),
+        modifier = modifier
+    ) {
+        HorizontalDivider()
+        options.forEach { kind ->
+            ChartToggleRow(
+                kind = kind,
+                checked = kind in visible,
+                onToggle = { onToggle(kind) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProfileOptionRow(
+    profile: StreamProfile,
+    selected: Boolean,
+    onSelect: () -> Unit,
+    enabled: Boolean = true,
+    label: String = profile.label
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onSelect)
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        RadioButton(selected = selected, onClick = onSelect, enabled = enabled)
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyLarge,
+            color = if (enabled) {
+                MaterialTheme.colorScheme.onSurface
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            }
+        )
+    }
+}
+
+private fun profileLabel(profile: StreamProfile, hasMicrophone: Boolean): String =
+    if (hasMicrophone) profile.label else when (profile) {
+        StreamProfile.Raw -> "IMU raw (16-bit)"
+        StreamProfile.ImuPacked -> "IMU packed (12-bit)"
+        else -> profile.label
+    }
 
 @Composable
 private fun ChartToggleRow(

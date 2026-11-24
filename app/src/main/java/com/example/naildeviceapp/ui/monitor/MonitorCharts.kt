@@ -16,6 +16,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.example.naildeviceapp.R
 import com.example.naildeviceapp.data.XyzWindow
+import com.example.naildeviceapp.model.ChartWindow
 import com.example.naildeviceapp.ui.chart.ChartAxis
 import com.example.naildeviceapp.ui.chart.ChartSeries
 import com.example.naildeviceapp.ui.chart.RealtimeLineChart
@@ -29,18 +30,8 @@ import com.example.naildeviceapp.ui.theme.rememberChartPalette
 private val CHART_HEIGHT = 132.dp
 private val SPECTROGRAM_HEIGHT = 120.dp
 
-/** Sample counts per chart window, and the rate each window is filled at. */
-private const val POWER_CAPACITY = 200
-private const val POWER_HZ = 20f
-private const val IMU_CAPACITY = 500
-private const val IMU_HZ = 100f
-private const val MIC_CAPACITY = 600
-private const val MIC_HZ = 600f
-private const val TEMPERATURE_CAPACITY = 200
-private const val TEMPERATURE_HZ = 20f
-
-private fun secondsAxis(capacity: Int, sampleRateHz: Float) =
-    ChartAxis(capacity) { sample -> "%.1f".format(sample / sampleRateHz) }
+private fun secondsAxis(capacity: Int, sampleRateHz: Int) =
+    ChartAxis(capacity) { sample -> "%.1f".format(sample / sampleRateHz.toFloat()) }
 
 @Composable
 fun SpectrogramCard(
@@ -77,7 +68,12 @@ fun PowerChartCard(
     ChartCard(
         title = stringResource(R.string.chart_power),
         series = series,
-        axis = secondsAxis(POWER_CAPACITY, POWER_HZ),
+        // ANALYSIS_HZ, not TICK_HZ: the power trace gains a point per analysis pass, and the axis
+        // has to be told the rate the buffer is actually filled at or the labels quietly lie.
+        axis = secondsAxis(ChartWindow.POWER_CAPACITY, ChartWindow.ANALYSIS_HZ),
+        // Not a physical quantity, unlike every other chart here. [SpectrumAnalyzer] divides each
+        // spectrum by its own peak, so this is 0..1 relative to the loudest bin in that same
+        // frame — two frames' values cannot be compared as absolute levels.
         yScale = YScale.Auto(fallback = YScale.Fixed(0f, 1f)),
         sensorLabel = sensorLabel,
         modifier = modifier
@@ -95,8 +91,10 @@ fun GyroChartCard(window: XyzWindow, modifier: Modifier = Modifier) {
     ChartCard(
         title = stringResource(R.string.chart_gyro),
         series = series,
-        axis = secondsAxis(IMU_CAPACITY, IMU_HZ),
-        yScale = YScale.Auto(fallback = YScale.Fixed(-500f, 500f)),
+        axis = secondsAxis(ChartWindow.IMU_CAPACITY, ChartWindow.IMU_DISPLAY_HZ),
+        // Real units: the decode already applied GYRO_DPS_PER_LSB, so these are degrees per second
+        // and the fallback is the sensor's configured +-2000 dps range.
+        yScale = YScale.Auto(fallback = YScale.Fixed(-2000f, 2000f)),
         modifier = modifier
     )
 }
@@ -112,8 +110,10 @@ fun AccelChartCard(window: XyzWindow, modifier: Modifier = Modifier) {
     ChartCard(
         title = stringResource(R.string.chart_imu),
         series = series,
-        axis = secondsAxis(IMU_CAPACITY, IMU_HZ),
-        yScale = YScale.Auto(fallback = YScale.Fixed(-1f, 1f)),
+        axis = secondsAxis(ChartWindow.IMU_CAPACITY, ChartWindow.IMU_DISPLAY_HZ),
+        // ACCEL_G_PER_LSB is already applied at decode, so these are g. The fallback is the
+        // configured +-16 g range rather than +-1, which only ever looked right at rest.
+        yScale = YScale.Auto(fallback = YScale.Fixed(-16f, 16f)),
         modifier = modifier
     )
 }
@@ -125,8 +125,12 @@ fun MicChartCard(mic: FloatArray, modifier: Modifier = Modifier) {
     ChartCard(
         title = stringResource(R.string.chart_mic),
         series = series,
-        axis = secondsAxis(MIC_CAPACITY, MIC_HZ),
-        yScale = YScale.Auto(fallback = YScale.Fixed(900f, 1800f)),
+        axis = secondsAxis(ChartWindow.MIC_CAPACITY, ChartWindow.MIC_DISPLAY_HZ),
+        // Raw int16 PCM — the same number the recording's `pcm` column holds, so a peak read off
+        // this chart can be looked up in the file. The fallback is the full scale the ADC can
+        // reach, which also makes clipping obvious: a tap that flattens against +-32768 is
+        // clipping, and that is not visible on a normalised axis.
+        yScale = YScale.Auto(fallback = YScale.Fixed(-32768f, 32767f)),
         modifier = modifier
     )
 }
@@ -140,7 +144,7 @@ fun TemperatureChartCard(temperature: FloatArray, modifier: Modifier = Modifier)
     ChartCard(
         title = stringResource(R.string.chart_temperature),
         series = series,
-        axis = secondsAxis(TEMPERATURE_CAPACITY, TEMPERATURE_HZ),
+        axis = secondsAxis(ChartWindow.TEMPERATURE_CAPACITY, ChartWindow.ANALYSIS_HZ),
         yScale = YScale.Auto(fallback = YScale.Fixed(20f, 40f)),
         modifier = modifier
     )

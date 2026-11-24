@@ -4,6 +4,7 @@ import android.content.Context
 import com.example.naildeviceapp.data.MockNailDeviceClient
 import com.example.naildeviceapp.data.MonitoringPreferences
 import com.example.naildeviceapp.data.NailDeviceClient
+import com.example.naildeviceapp.data.RecordingLocationPreferences
 import com.example.naildeviceapp.data.ble.NailBleClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,9 +27,13 @@ object AppContainer {
 
     val monitoringPreferences: MonitoringPreferences by lazy { MonitoringPreferences() }
 
+    val recordingLocation: RecordingLocationPreferences by lazy {
+        RecordingLocationPreferences(appContext)
+    }
+
     val deviceClient: NailDeviceClient by lazy {
         if (USE_MOCK_DEVICE) MockNailDeviceClient(scope, monitoringPreferences)
-        else NailBleClient(appContext, scope, monitoringPreferences)
+        else NailBleClient(appContext, scope, monitoringPreferences, recordingLocation)
     }
 
     fun init(context: Context) {

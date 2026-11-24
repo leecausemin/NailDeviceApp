@@ -2,11 +2,13 @@ package com.example.naildeviceapp.data
 
 import com.example.naildeviceapp.model.ConnectionState
 import com.example.naildeviceapp.model.DeviceStatus
+import com.example.naildeviceapp.model.DeviceMode
 import com.example.naildeviceapp.model.ImuSamplingRate
 import com.example.naildeviceapp.model.RecordingState
 import com.example.naildeviceapp.model.SamplingRate
 import com.example.naildeviceapp.model.ScannedDevice
 import com.example.naildeviceapp.model.StreamMarks
+import com.example.naildeviceapp.model.StreamProfile
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -25,11 +27,12 @@ interface NailDeviceClient {
     fun stopScan()
     fun connect(device: ScannedDevice)
     fun disconnect()
+    fun selectDeviceMode(mode: DeviceMode)
 
     fun setSamplingRate(rate: SamplingRate)
     fun setImuSamplingRate(rate: ImuSamplingRate)
+    fun setStreamProfile(profile: StreamProfile)
     fun setGain(percent: Float)
-    fun setTimeSync(enabled: Boolean)
     fun setRecording(state: RecordingState)
     fun downloadMemory()
 }

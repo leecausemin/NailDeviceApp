@@ -135,5 +135,8 @@ internal fun formatAxisValue(value: Float, tickStep: Float): String {
         step >= 0.01f -> 3
         else -> 4
     }
-    return "%.${decimals}f".format(value)
+    val text = "%.${decimals}f".format(value)
+    // A tick that lands a hair below zero formats as "-0" / "-0.00", which reads as a real negative
+    // value on an axis whose other ticks are thousands. Auto-scaled bounds land there routinely.
+    return if (text.startsWith("-") && text.drop(1).none { it in '1'..'9' }) text.drop(1) else text
 }
