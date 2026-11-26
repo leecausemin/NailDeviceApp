@@ -57,7 +57,12 @@ CONFIG = {
     'PID_SENSOR_SAMPLE_INTERVAL_S': 0.025,
     'PID_MAX_FEEDBACK_AGE_S': 0.50,
     'PID_MAX_DURATION_S': 120.0,
-    'HOMING_MODE': 1  
+    'HOMING_MODE': 1,
+
+    # 폰 앱(NailDeviceApp) 동시 녹화: 5 kHz 로드셀 측정과 같이 시작/정지
+    'USE_PHONE': True,          # False면 예전처럼 로드셀만
+    'PHONE_PREROLL_S': 1.0,     # 앱 녹화 시작 후 로드셀/X 시작까지 대기
+    'PHONE_POSTROLL_S': 0.5,    # X 정지 후 앱 녹화 정지까지 대기
 }
     
 CALIB_FILE = r"C:\Load Cell\revised_FT21184\FT21184\FT21185.cal"
@@ -100,12 +105,32 @@ daq_thread = None #DAQ 스레드 핸들
 force_last_update = 0.0
 daq_failed = threading.Event()
 
-# Optional per-trial hooks (used by Nano17_Session_PhoneSync.py to start/stop the phone app).
-# None = original behaviour. before_motion(name) runs before the 5 kHz DAQ starts (an exception
-# aborts the trial before X moves); after_motion(name) runs once X has stopped and the DAQ is closed.
-TRIAL_HOOKS = {'before_motion': None, 'after_motion': None}
-# PC unix times of the last slide (DAQ start, X command, X done) for the session manifest.
-LAST_TRIAL = {}
+# 폰 앱 원격 녹화 (phone_remote.py). main()에서 연결, None이면 로드셀만.
+PHONE = None
+phone_recording = False
+
+
+def phone_start(name):
+    """앱 녹화 시작. 앱 파일 이름 = nail_<stamp>_<로드셀 파일과 같은 이름>."""
+    global phone_recording
+    if PHONE is None:
+        return
+    PHONE.start(name)
+    phone_recording = True
+    print(f'[PHONE] 녹화 시작: {name}')
+    time.sleep(float(CONFIG['PHONE_PREROLL_S']))
+
+
+def phone_stop():
+    """앱 녹화 정지 후 폰 폴더를 SAVE_DIR/phone/ 으로 복사."""
+    global phone_recording
+    if PHONE is None or not phone_recording:
+        return
+    time.sleep(float(CONFIG['PHONE_POSTROLL_S']))
+    s = PHONE.stop()
+    phone_recording = False
+    folder = PHONE.pull(s['name'], Path(CONFIG['SAVE_DIR']) / 'phone', s['where'])
+    print(f'[SAVED] {folder}')
 
 # ============================================================================
 # PID 컨트롤러 클래스
@@ -624,10 +649,7 @@ def record_5khz_slide(stage_Xaxis, stage_Zaxis, sensor, force_n, speed_mm_s, cas
     started_at = time.monotonic()
     block = int(CONFIG['SLIDE_BLOCK_SAMPLES'])
     fs = float(CONFIG['SLIDE_RATE_HZ'])
-    LAST_TRIAL.clear()
-    LAST_TRIAL['name'] = name
-    if TRIAL_HOOKS.get('before_motion'):
-        TRIAL_HOOKS['before_motion'](name)
+    phone_start(name)  # 앱 녹화 먼저 (실패하면 X가 움직이기 전에 멈춤)
 
     def capture():
         try:
@@ -640,7 +662,6 @@ def record_5khz_slide(stage_Xaxis, stage_Zaxis, sensor, force_n, speed_mm_s, cas
                 data = np.empty((6, block), dtype=np.float64)
                 reader = AnalogMultiChannelReader(task.in_stream)
                 task.start()
-                LAST_TRIAL['daq_start_unix'] = time.time()
                 acquired.set()
                 while not abort.is_set():
                     reader.read_many_sample(data, number_of_samples_per_channel=block, timeout=2.0)
@@ -682,9 +703,7 @@ def record_5khz_slide(stage_Xaxis, stage_Zaxis, sensor, force_n, speed_mm_s, cas
             raise RuntimeError('X target outside software travel limits')
         if stage_Xaxis.get_position() >= target - 0.5:
             raise RuntimeError('X already near end target; check homing and initial position')
-        LAST_TRIAL['x_cmd_unix'] = time.time()
         ok = stage_Xaxis.Xaxis_MoveTo(target, vel=speed_mm_s, acc=30.0)
-        LAST_TRIAL['x_done_unix'] = time.time()
         if not ok: raise RuntimeError('X stage MoveTo failed')
         actual_x = float(stage_Xaxis.get_position())
         if not math.isfinite(actual_x) or abs(actual_x - target) > 0.5:
@@ -695,12 +714,10 @@ def record_5khz_slide(stage_Xaxis, stage_Zaxis, sensor, force_n, speed_mm_s, cas
         try: stage_Xaxis.stop() if err else None
         except Exception: pass
         t_cap.join(timeout=5); t_stage.join(timeout=2)
-        if TRIAL_HOOKS.get('after_motion'):
-            try:
-                TRIAL_HOOKS['after_motion'](name)
-            except Exception as e:  # keep the load-cell data; the session script reports this
-                LAST_TRIAL['hook_error'] = repr(e)
-                print(f'⚠️  after_motion hook failed: {e}')
+        try:
+            phone_stop()
+        except Exception as e:  # 로드셀 데이터는 그대로 저장
+            print(f'⚠️  앱 녹화 정지/복사 실패: {e}')
     if t_cap.is_alive():
         raise RuntimeError('5 kHz DAQ thread still active; refusing conversion or next trial')
     if err:
@@ -724,8 +741,6 @@ def record_5khz_slide(stage_Xaxis, stage_Zaxis, sensor, force_n, speed_mm_s, cas
             prev = (tm, pos)
     print(f'[SAVED] {force_file} | {(sum(m.shape[1] for m in raw_blocks))} samples/channel at {fs:g} Hz')
     print(f'[SAVED] {stage_file}')
-    LAST_TRIAL['force_file'] = str(force_file)
-    LAST_TRIAL['stage_file'] = str(stage_file)
     return str(force_file)
 
 # ============================================================================
@@ -958,7 +973,7 @@ def setup_initial_stage_positions(stage_Xaxis, stage_Zaxis):
 # 메인 제어 루프
 # ============================================================================
 def main():
-    global TARGET_FORCE_MAGNITUDE
+    global TARGET_FORCE_MAGNITUDE, PHONE
     print('--- Experiment settings (before connection) ---')
     target = float(input('Target normal force (N, positive; e.g. 3): ').strip())
     vel = float(input('Sliding speed (mm/s; e.g. 20): ').strip())
@@ -978,6 +993,11 @@ def main():
     print(f'CONFIG: {target:g}N, {vel:g}mm/s, case={case}, trials={reps}')
     print('NORMAL only: PID Fz before sliding; fixed X speed; 5 kHz force log.')
     print('WARNING: Z stays fixed while sliding; check measured Fz in CSV.')
+    if CONFIG['USE_PHONE']:
+        # 폰: USB 연결 + 앱 실행 + Nail 장치 연결된 상태여야 함
+        from phone_remote import PhoneRecorder
+        PHONE = PhoneRecorder()
+        print(f'✓ 폰 앱 연결: {PHONE.connect()}')
     input('After verifying stage travel, sensor calibration and physical E-stop, press Enter to connect...')
     print("=" * 80)
     print("😆✨🍀실험 시작~~~~~ w/ Linear Stages and Load Cell")
@@ -1043,8 +1063,12 @@ def main():
         print(f'[ABORT] {e}')
         try: stage_Xaxis.stop(); stage_Zaxis.stop()
         except Exception: pass
+        try: phone_stop()  # 중간에 멈춰도 앱 녹화는 닫음
+        except Exception: pass
     finally:
         exit_event.set()
+        if PHONE is not None:
+            PHONE.close()
 
     # ====================================================================
     # [5단계] 시스템 종료

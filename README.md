@@ -74,8 +74,7 @@ Nail 디바이스와 BLE로 연결해 마이크와 IMU 데이터를 실시간으
 앱이 켜져 있으면 폰 안에서 `127.0.0.1:8765`로 PC 명령을 받음 (`START <label>`, `STOP`, `PING`, `STATUS`).
 PC는 USB + `adb forward`로 접속함. PC 쪽 실행 코드와 사용법은 [`Nano17_CustomTrials_PID_NormalOnly_X45539324/`](Nano17_CustomTrials_PID_NormalOnly_X45539324/README.md)에 있음.
 
-- PC가 시작한 녹화는 이름 뒤에 trial id가 붙음: `nail_<stamp>_<label>`
-- `_session.txt`에 폰 시계 기준 시각(시작, 정지, 첫 mic/IMU 패킷, epoch ms)이 추가됨
+- PC가 시작한 녹화는 로드셀 파일과 같은 이름이 붙음: `nail_<stamp>_<로드셀 파일 이름>`
 
 ## 프로토콜
 
