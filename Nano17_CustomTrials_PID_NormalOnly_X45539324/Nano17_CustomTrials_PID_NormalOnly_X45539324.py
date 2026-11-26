@@ -127,20 +127,22 @@ def phone_start(name):
 
 
 def phone_stop():
-    """앱 녹화 정지 후 폰 폴더를 SAVE_DIR/phone/ 으로 복사하고 대략적인 지연을 기록."""
+    """앱 녹화 정지 후 폰 폴더를 SAVE_DIR/nail_<stamp>_<이름>/ 으로 복사하고 대략적인 지연을
+    그 폴더에 기록. 이 폴더를 돌려줌 (로드셀 CSV도 여기에 저장됨)."""
     global phone_recording
     if PHONE is None or not phone_recording:
-        return
+        return None
     time.sleep(float(CONFIG['PHONE_POSTROLL_S']))
     s = PHONE.stop()
     phone_recording = False
-    folder = PHONE.pull(s['name'], Path(CONFIG['SAVE_DIR']) / 'phone', s['where'])
+    folder = PHONE.pull(s['name'], Path(CONFIG['SAVE_DIR']), s['where'])
     print(f'[SAVED] {folder}')
     log_rough_lag(folder)
+    return folder
 
 
 def log_rough_lag(phone_folder):
-    """results/phone_sync_log.csv에 trial마다 한 줄.
+    """그 trial 폴더(nail_<stamp>_<이름>/) 안에 phone_sync_log.csv 저장.
 
     lag_s = 로드셀 t=0이 폰 파일(첫 샘플 = t=0)의 몇 초 지점인지 (대략, ±0.3 s 정도).
     폰 첫 샘플 시각은 첫 패킷이 폰에 '도착한' 시각으로 잡으므로, 보드 버퍼/BLE 지연만큼
@@ -151,13 +153,11 @@ def log_rough_lag(phone_folder):
     note = read_session_note(phone_folder)
     first_mic_unix = PHONE.phone_ms_to_pc_unix(note['first_mic']) if note.get('first_mic') else None
     lag = (daq_start_unix - first_mic_unix) if (daq_start_unix and first_mic_unix) else None
-    log = Path(CONFIG['SAVE_DIR']) / 'phone_sync_log.csv'
-    new = not log.exists()
-    with open(log, 'a', newline='', encoding='utf-8-sig') as fp:
+    log = Path(phone_folder) / 'phone_sync_log.csv'
+    with open(log, 'w', newline='', encoding='utf-8-sig') as fp:
         w = csv.writer(fp)
-        if new:
-            w.writerow(['loadcell_name', 'phone_folder', 'lag_s',
-                        'daq_start_unix', 'phone_first_mic_unix', 'clock_offset_ms', 'clock_rtt_ms'])
+        w.writerow(['loadcell_name', 'phone_folder', 'lag_s',
+                    'daq_start_unix', 'phone_first_mic_unix', 'clock_offset_ms', 'clock_rtt_ms'])
         w.writerow([phone_trial_name, Path(phone_folder).name,
                     '' if lag is None else f'{lag:.4f}',
                     '' if daq_start_unix is None else f'{daq_start_unix:.4f}',
@@ -674,6 +674,7 @@ def record_5khz_slide(stage_Xaxis, stage_Zaxis, sensor, force_n, speed_mm_s, cas
     name = f"{force_n:g}N_{speed_mm_s:g}mmps_{safe_case}_r{trial_num:02d}_{time.strftime('%Y%m%d_%H%M%S')}"
     force_file = folder / (name + '_FxFyFz_5000Hz.csv')
     stage_file = folder / (name + '_Xstage_velocity.csv')
+    trial_dir = None  # 앱 녹화 폴더 (phone_stop이 채움)
     raw_blocks = []
     positions = []
     abort = threading.Event()
@@ -750,13 +751,18 @@ def record_5khz_slide(stage_Xaxis, stage_Zaxis, sensor, force_n, speed_mm_s, cas
         except Exception: pass
         t_cap.join(timeout=5); t_stage.join(timeout=2)
         try:
-            phone_stop()
-        except Exception as e:  # 로드셀 데이터는 그대로 저장
+            trial_dir = phone_stop()
+        except Exception as e:  # 로드셀 데이터는 그대로 저장 (SAVE_DIR에)
             print(f'⚠️  앱 녹화 정지/복사 실패: {e}')
     if t_cap.is_alive():
         raise RuntimeError('5 kHz DAQ thread still active; refusing conversion or next trial')
     if err:
         raise RuntimeError('5 kHz DAQ failed: '+str(err[0]))
+
+    # 앱 녹화가 됐으면 로드셀 CSV도 같은 nail_<stamp>_<이름>/ 폴더에 저장
+    if trial_dir is not None:
+        force_file = Path(trial_dir) / force_file.name
+        stage_file = Path(trial_dir) / stage_file.name
 
     # motion has finished; make CSV only now, avoiding writer bottleneck during slide
     with open(force_file, 'w', newline='', encoding='utf-8-sig') as fp:
