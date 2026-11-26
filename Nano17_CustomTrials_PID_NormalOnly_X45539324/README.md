@@ -27,13 +27,25 @@ python Nano17_CustomTrials_PID_NormalOnly_X45539324.py
 Z PID로 목표 힘 → 앱 녹화 시작 → 1 s → 5 kHz 로드셀 + X 이동 → 0.5 s → 앱 녹화 정지 → 폰 파일을 PC로 복사
 ```
 
-- 로드셀: `results/<이름>_FxFyFz_5000Hz.csv` (예전과 같음)
-- 앱: `results/phone/nail_<stamp>_<같은 이름>/` → 로드셀 파일과 이름으로 바로 짝 맞음
+trial마다 폴더 하나에 전부 저장됨:
+
+```
+results/nail_<stamp>_<이름>/
+├── nail_<stamp>_<이름>_imu.csv
+├── nail_<stamp>_<이름>_mic.csv
+├── nail_<stamp>_<이름>_session.txt
+├── <이름>_FxFyFz_5000Hz.csv        로드셀
+├── <이름>_Xstage_velocity.csv      스테이지
+└── phone_sync_log.csv              대략적인 지연
+```
+
+- `<이름>` = `3N_20mmps_Resin_r01_20261126_130000` 같은 기존 로드셀 파일 이름
+- 앱 녹화가 실패하면 로드셀 CSV는 예전처럼 `results/`에 저장됨
 - 앱이 연결 안 돼 있으면 시작할 때 멈춤. 녹화 시작이 안 되면 X가 움직이기 전에 멈춤.
 
 ## 대략적인 지연 기록
 
-trial마다 `results/phone_sync_log.csv`에 한 줄씩 남음.
+trial 폴더 안 `phone_sync_log.csv` (한 줄).
 
 | 열 | 뜻 |
 |---|---|
