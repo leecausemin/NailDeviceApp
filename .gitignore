@@ -33,6 +33,12 @@ google-services.json
 *.csv
 *.wav
 
+# ---- PC 실험 코드 (Nano17_...) ----
+__pycache__/
+*.pyc
+sessions/
+phone_test/
+
 # ---- OS ----
 .DS_Store
 Thumbs.db
