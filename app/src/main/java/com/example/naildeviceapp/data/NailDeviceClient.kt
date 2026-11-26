@@ -34,5 +34,11 @@ interface NailDeviceClient {
     fun setStreamProfile(profile: StreamProfile)
     fun setGain(percent: Float)
     fun setRecording(state: RecordingState)
+
+    /**
+     * Starts recording with [label] added to the file names (used by the PC remote control so the
+     * phone files carry the trial id). Clients without labelled files just start recording.
+     */
+    fun startLabeledRecording(label: String) = setRecording(RecordingState.Recording)
     fun downloadMemory()
 }

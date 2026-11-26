@@ -18,6 +18,10 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"
         android:maxSdkVersion="30" />
 
+    <!-- Remote control from the experiment PC (RemoteControlServer, 127.0.0.1 only, reached through
+         `adb forward`). Plain sockets need INTERNET even on loopback. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <uses-feature
         android:name="android.hardware.bluetooth_le"
         android:required="true" />

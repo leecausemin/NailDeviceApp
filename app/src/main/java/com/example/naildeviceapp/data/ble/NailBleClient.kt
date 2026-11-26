@@ -1251,14 +1251,25 @@ class NailBleClient(
     /** Not supported by this firmware. */
     override fun setGain(percent: Float) = Unit
 
+    /** Label for the next recording only; consumed (and cleared) by [setRecording]. */
+    @Volatile
+    private var nextRecordingLabel: String? = null
+
+    override fun startLabeledRecording(label: String) {
+        nextRecordingLabel = label
+        setRecording(RecordingState.Recording)
+    }
+
     override fun setRecording(state: RecordingState) {
         when (state) {
             RecordingState.Recording -> {
                 recordingStartedAt = System.currentTimeMillis()
+                val label = nextRecordingLabel
+                nextRecordingLabel = null
                 writeCommand(NailProtocol.cmdSetLatency(NailProtocol.LATENCY_RECORD_MS))
                 // Opened on the recorder's own thread, the one that will be writing to it, so
                 // start() cannot race with an append already in flight.
-                scope.launch(recorderDispatcher) { recorder.start(recordingSettings()) }
+                scope.launch(recorderDispatcher) { recorder.start(recordingSettings(), label) }
                 micReceived = 0
                 micLost = 0
                 imuReceived = 0

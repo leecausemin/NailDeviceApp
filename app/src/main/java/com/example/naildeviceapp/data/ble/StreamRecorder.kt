@@ -81,6 +81,17 @@ class StreamRecorder(
     private var baseName = ""
     private var settings: Settings? = null
     private var startedAt = 0L
+    private var label: String? = null
+
+    /**
+     * Phone wall-clock time (epoch ms) when the first packet of each stream reached [appendMic] /
+     * [appendImu]. Written into the session note: with the PC's clock offset (measured by the
+     * remote-control PING) this places sample 0 on the PC's timeline to within BLE latency.
+     */
+    @Volatile
+    private var firstMicArrivalMs = 0L
+    @Volatile
+    private var firstImuArrivalMs = 0L
 
     /**
      * Samples added to every IMU index so both files share one origin.
@@ -121,7 +132,12 @@ class StreamRecorder(
         if (pool == null) job.run() else pool.execute(job)
     }
 
-    fun start(settings: Settings) {
+    /**
+     * [label] is appended to the folder and file names (`nail_<stamp>_<label>`) so a recording
+     * started by the PC carries the same trial id as the load-cell file. The stamp stays first and
+     * the label is sanitised to letters, digits, `-` and `_`, so `nail_<stamp>` parsing still works.
+     */
+    fun start(settings: Settings, label: String? = null) {
         if (isRecording) return
 
         micWritten = 0
@@ -142,7 +158,11 @@ class StreamRecorder(
             Math.round(offsetUs / 1_000_000.0 * settings.imuRateHz)
         } ?: 0L
 
-        baseName = "nail_${fileStamp().format(Date(startedAt))}"
+        firstMicArrivalMs = 0L
+        firstImuArrivalMs = 0L
+        this.label = sanitizeLabel(label)
+        baseName = "nail_${fileStamp().format(Date(startedAt))}" +
+            (this.label?.let { "_$it" } ?: "")
 
         // One directory per recording, named after it, so the three files cannot be separated by
         // sorting a flat Downloads folder.
@@ -180,7 +200,10 @@ class StreamRecorder(
     fun appendMic(index: Long, samples: ShortArray) {
         val writer = micWriter ?: return
 
-        if (expectedMicIndex < 0) expectedMicIndex = index
+        if (expectedMicIndex < 0) {
+            expectedMicIndex = index
+            firstMicArrivalMs = System.currentTimeMillis()
+        }
 
         // Keep the gap visible in the indices instead of silently closing it.
         val gap = index - expectedMicIndex
@@ -217,7 +240,10 @@ class StreamRecorder(
     fun appendImu(index: Long, samples: List<ImuSample>, hasGyro: Boolean = true) {
         val writer = imuWriter ?: return
 
-        if (expectedImuIndex < 0) expectedImuIndex = index
+        if (expectedImuIndex < 0) {
+            expectedImuIndex = index
+            firstImuArrivalMs = System.currentTimeMillis()
+        }
         val gap = index - expectedImuIndex
         if (gap > 0) {
             imuGaps += gap
@@ -320,6 +346,15 @@ class StreamRecorder(
             appendLine("Started        ${clock.format(Date(startedAt))}")
             appendLine("Stopped        ${clock.format(Date(stoppedAt))}")
             appendLine("Duration       ${"%.1f".format(durationSeconds)} s")
+            appendLine("Label          ${label ?: "(none)"}")
+            appendLine()
+            appendLine("Phone clock (epoch ms, System.currentTimeMillis)")
+            appendLine("  started            $startedAt")
+            appendLine("  stopped            $stoppedAt")
+            appendLine("  first mic packet   $firstMicArrivalMs")
+            appendLine("  first IMU packet   $firstImuArrivalMs")
+            appendLine("               Packet arrival, not sample time: sample 0 was taken one")
+            appendLine("               BLE latency (tens of ms) earlier.")
             appendLine()
             appendLine("Sampling rates")
             appendLine("  Microphone   ${s?.micRateHz ?: 0} Hz")
@@ -517,6 +552,15 @@ class StreamRecorder(
 
         /** Generous: this only has to cover a queue that is already bounded and nearly drained. */
         const val WRITER_DRAIN_TIMEOUT_SECONDS = 10L
+
+        /** Letters, digits, `-`, `_` only, at most 64 chars; null when nothing is left. */
+        fun sanitizeLabel(raw: String?): String? =
+            raw?.trim()
+                ?.map { if (it.isLetterOrDigit() && it.code < 128 || it == '-' || it == '_') it else '_' }
+                ?.joinToString("")
+                ?.take(64)
+                ?.trim('_')
+                ?.ifEmpty { null }
 
         // Built per call rather than shared: SimpleDateFormat is not thread safe.
         fun fileStamp() = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)

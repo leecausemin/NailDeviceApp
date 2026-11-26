@@ -7,5 +7,7 @@ class NailApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         AppContainer.init(this)
+        // PC-side start/stop over `adb forward`; see RemoteControlServer.
+        AppContainer.remoteControl.start()
     }
 }

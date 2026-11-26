@@ -6,6 +6,7 @@ import com.example.naildeviceapp.data.MonitoringPreferences
 import com.example.naildeviceapp.data.NailDeviceClient
 import com.example.naildeviceapp.data.RecordingLocationPreferences
 import com.example.naildeviceapp.data.ble.NailBleClient
+import com.example.naildeviceapp.data.remote.RemoteControlServer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -34,6 +35,11 @@ object AppContainer {
     val deviceClient: NailDeviceClient by lazy {
         if (USE_MOCK_DEVICE) MockNailDeviceClient(scope, monitoringPreferences)
         else NailBleClient(appContext, scope, monitoringPreferences, recordingLocation)
+    }
+
+    /** Lazily resolves the client so the server can start before any screen exists. */
+    val remoteControl: RemoteControlServer by lazy {
+        RemoteControlServer(client = { deviceClient }, location = { recordingLocation })
     }
 
     fun init(context: Context) {
