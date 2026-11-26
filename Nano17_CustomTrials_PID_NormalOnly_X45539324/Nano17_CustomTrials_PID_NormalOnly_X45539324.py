@@ -108,21 +108,26 @@ daq_failed = threading.Event()
 # 폰 앱 원격 녹화 (phone_remote.py). main()에서 연결, None이면 로드셀만.
 PHONE = None
 phone_recording = False
+phone_trial_name = None
+daq_start_unix = None   # 5 kHz DAQ task.start() 직후 PC 시각 (time.time())
 
 
 def phone_start(name):
     """앱 녹화 시작. 앱 파일 이름 = nail_<stamp>_<로드셀 파일과 같은 이름>."""
-    global phone_recording
+    global phone_recording, phone_trial_name, daq_start_unix
+    daq_start_unix = None
     if PHONE is None:
         return
+    PHONE.sync_clock(n=10)   # 폰 시계 - PC 시계 (trial마다 다시 잼)
     PHONE.start(name)
     phone_recording = True
+    phone_trial_name = name
     print(f'[PHONE] 녹화 시작: {name}')
     time.sleep(float(CONFIG['PHONE_PREROLL_S']))
 
 
 def phone_stop():
-    """앱 녹화 정지 후 폰 폴더를 SAVE_DIR/phone/ 으로 복사."""
+    """앱 녹화 정지 후 폰 폴더를 SAVE_DIR/phone/ 으로 복사하고 대략적인 지연을 기록."""
     global phone_recording
     if PHONE is None or not phone_recording:
         return
@@ -131,6 +136,34 @@ def phone_stop():
     phone_recording = False
     folder = PHONE.pull(s['name'], Path(CONFIG['SAVE_DIR']) / 'phone', s['where'])
     print(f'[SAVED] {folder}')
+    log_rough_lag(folder)
+
+
+def log_rough_lag(phone_folder):
+    """results/phone_sync_log.csv에 trial마다 한 줄.
+
+    lag_s = 로드셀 t=0이 폰 파일(첫 샘플 = t=0)의 몇 초 지점인지 (대략, ±0.3 s 정도).
+    폰 첫 샘플 시각은 첫 패킷이 폰에 '도착한' 시각으로 잡으므로, 보드 버퍼/BLE 지연만큼
+    실제보다 늦게 잡힘 -> lag_s가 실제보다 0~0.3 s 작게 나올 수 있음.
+    정밀 정렬은 이 값을 중심으로 좁은 범위(예: ±0.5 s)에서 xcorr.
+    """
+    from phone_remote import read_session_note
+    note = read_session_note(phone_folder)
+    first_mic_unix = PHONE.phone_ms_to_pc_unix(note['first_mic']) if note.get('first_mic') else None
+    lag = (daq_start_unix - first_mic_unix) if (daq_start_unix and first_mic_unix) else None
+    log = Path(CONFIG['SAVE_DIR']) / 'phone_sync_log.csv'
+    new = not log.exists()
+    with open(log, 'a', newline='', encoding='utf-8-sig') as fp:
+        w = csv.writer(fp)
+        if new:
+            w.writerow(['loadcell_name', 'phone_folder', 'lag_s',
+                        'daq_start_unix', 'phone_first_mic_unix', 'clock_offset_ms', 'clock_rtt_ms'])
+        w.writerow([phone_trial_name, Path(phone_folder).name,
+                    '' if lag is None else f'{lag:.4f}',
+                    '' if daq_start_unix is None else f'{daq_start_unix:.4f}',
+                    '' if first_mic_unix is None else f'{first_mic_unix:.4f}',
+                    f'{PHONE.offset_ms:.1f}', f'{PHONE.rtt_ms:.1f}'])
+    print(f'[SYNC] 로드셀 t=0 ≈ 폰 파일 {lag:.3f} s 지점' if lag is not None else '[SYNC] 지연 계산 실패')
 
 # ============================================================================
 # PID 컨트롤러 클래스
@@ -652,6 +685,7 @@ def record_5khz_slide(stage_Xaxis, stage_Zaxis, sensor, force_n, speed_mm_s, cas
     phone_start(name)  # 앱 녹화 먼저 (실패하면 X가 움직이기 전에 멈춤)
 
     def capture():
+        global daq_start_unix
         try:
             with nidaqmx.Task() as task:
                 for ch in DAQ_CHANNELS:
@@ -662,6 +696,7 @@ def record_5khz_slide(stage_Xaxis, stage_Zaxis, sensor, force_n, speed_mm_s, cas
                 data = np.empty((6, block), dtype=np.float64)
                 reader = AnalogMultiChannelReader(task.in_stream)
                 task.start()
+                daq_start_unix = time.time()
                 acquired.set()
                 while not abort.is_set():
                     reader.read_many_sample(data, number_of_samples_per_channel=block, timeout=2.0)
